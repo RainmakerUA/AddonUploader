@@ -136,7 +136,7 @@ function Send-AddonFile {
 	finally {
 		if (Test-Path -LiteralPath $TempFolder -PathType Container ) {
 			if ($NoCleanup) {
-				Write-Host -NoNewline -ForegroundColor DarkYellow "Temp folder: "
+				Write-Host -NoNewline -ForegroundColor DarkYellow "Temp folder left: "
 				Write-Host -ForegroundColor Yellow $TempFolder
 			}
 			else {
@@ -303,10 +303,16 @@ function CopyLibs {
 		[string[]] $Libs = @()
 	)
 
+	$archLibs = New-Item $Target -ItemType Directory -Force | Out-Null
+
 	$libs | % {
 		$libPath = Join-Path $Store $_
-		Copy-Item -LiteralPath $libPath -Destination $Target -Recurse -Container
+		#Write-Host -NoNewline "Copy lib $libPath -> $Target ..."
+		Copy-Item -LiteralPath $libPath -Destination $Target -Recurse -Container #-Verbose
+		#Write-Host -ForegroundColor DarkGreen ' DONE'
 	}
+
+	$archLibs.FullName
 }
 
 function ReplaceContentPlaceholders {
@@ -343,7 +349,7 @@ function ReplaceContentPlaceholders {
 }
 
 function ParseTagRefs([string] $refs) {
-	[string]($refs | Select-String 'tag:\s*([\w-.]+),' -AllMatches | %{$_.matches} | %{ $_.Groups[1].Value} | sort | select -Last 1)
+	[string]($refs | Select-String 'tag:\s*([\w-.]+)' -AllMatches | %{$_.matches} | %{ $_.Groups[1].Value} | sort | select -Last 1)
 }
 
 <################################################
@@ -370,8 +376,10 @@ function GetLog {
 										version=$(ParseTagRefs $log[$_*$lines + 1]); `
 										hash=$log[$_*$lines + 2]; title=$log[$_*$lines + 3]; `
 										description=$log[$_*$lines + 4] } } |
+				? { $_.title -inotmatch '^merge' -or $version } |
 				Group-Object -Property @{Expression = {$_.date.Date}}, version |
-				Sort-Object -Property @{Expression = {$_.Values[0]}; Descending = $true}, @{Expression = {$_.Values[1]}} | % {
+				Sort-Object -Property @{Expression = {$_.Values[0]}; Descending = $true}, `
+										@{Expression = {$_.Values[1]}; Descending = $true} | % {
 					$group = $_
 					$dateStr = $group.Values[0].ToString('dd.MM.yyyy')
 					$verStr = $group.Values[1]
