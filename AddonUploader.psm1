@@ -71,6 +71,8 @@ function Send-AddonFile {
 		[Parameter(Mandatory = $false)]
 		[string] $ZipName,
 		[Parameter(Mandatory = $false)]
+		[switch] $NoUpload,
+		[Parameter(Mandatory = $false)]
 		[switch] $NoCleanup
 	)
 
@@ -129,9 +131,13 @@ function Send-AddonFile {
 
 		Compress-Archive $archFolder $ZipName -CompressionLevel Optimal
 
-		$fileID = UploadArchive $InputFolder $ZipName $cfg.release
-
-		Write-Host "File uploaded. ID = $fileID"
+		if ($NoUpload) {
+			Write-Host "File uploading skipped."
+		}
+		else {
+			$fileID = UploadArchive $InputFolder $ZipName $cfg.release
+			Write-Host "File uploaded. ID = $fileID"
+		}
 	}
 	finally {
 		if (Test-Path -LiteralPath $TempFolder -PathType Container ) {
@@ -341,10 +347,10 @@ function ReplaceContentPlaceholders {
 			}
 			else {
 				Write-Host -ForegroundColor DarkRed "$prop is not set"
-				"\-[PropertyError: '$prop']"
+				"[PropertyError: '$prop']"
 			}
 		})
-		Set-Content -LiteralPath $file -Value $content -Force
+		Set-Content -LiteralPath $file -Value $content -NoNewline -Force
 	}
 }
 
@@ -368,7 +374,9 @@ function GetLog {
 
 		$lastVersion = $null
 		$lines = 5
-		$log = & git log --tags --pretty=format:"%aI|%D|%h|%s|%b" 2>&1 | %{ $_ -split '\|' }
+		$branch = & git branch | ?{ $_.StartsWith('*') } | %{ $_.Substring(2) } | Select-Object -First 1
+		#$log = & git log --tags --pretty=format:"%aI|%D|%h|%s|%b" 2>&1 | %{ $_ -split '\|' }
+		$log = & git log $branch --pretty=format:"%aI|%D|%h|%s|%b" 2>&1 | %{ $_ -split '\|' }
 
 		if($?) {
 			( (0..$($log.Length/$lines - 1)) |
