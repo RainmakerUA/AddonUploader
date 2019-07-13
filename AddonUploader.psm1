@@ -263,6 +263,7 @@ function SetReleaseInfo {
 		}
 
 		$Release.version = $version
+		$Release.date = [datetime]::Today.ToString('yyyyMMdd')
 		$Release.type = $type
 		$Release.log = $($log -replace "`n`n","`n").Trim()
 	}
@@ -373,41 +374,91 @@ function GetLog {
 		Push-Location $GitFolder
 
 		$lastVersion = $null
-		$lines = 5
-		$branch = & git branch | ?{ $_.StartsWith('*') } | %{ $_.Substring(2) } | Select-Object -First 1
-		#$log = & git log --tags --pretty=format:"%aI|%D|%h|%s|%b" 2>&1 | %{ $_ -split '\|' }
-		$log = & git log $branch --pretty=format:"%aI|%D|%h|%s|%b" 2>&1 | %{ $_ -split '\|' }
+		$branch = & git branch | ? { $_.StartsWith('*') } | % { $_.Substring(2) } | Select-Object -First 1
+		$log = & git log $branch --pretty=format:"%aI|%D|%h|%B" 2>&1 | %{ $_ -split '\|' }
 
 		if($?) {
-			( (0..$($log.Length/$lines - 1)) |
-				%{ [pscustomobject] @{ date=[DateTime]::Parse($log[$_*$lines]); `
-										version=$(ParseTagRefs $log[$_*$lines + 1]); `
-										hash=$log[$_*$lines + 2]; title=$log[$_*$lines + 3]; `
-										description=$log[$_*$lines + 4] } } |
+			$mode = 0
+			$logEntries = @()
+			$date = $null
+			$version = $null
+			$hash = $null
+			$title = $null
+			$description = $null
+			for ($line = 0; $line -lt $log.Count; $line++) {
+				$currentLine = $log[$line]
+				$newDate = [DateTime]::MinValue
+
+				if (($mode -eq 0 -or $mode -gt 4) -and [DateTime]::TryParse($currentLine, [ref]$newDate) ) {
+					if ($date) {
+						$logEntries += [pscustomobject] @{
+							date = $date; version = $version; hash = $hash; `
+							title = $title; description = $description
+						}
+						$date = $null
+						$version = $null
+						$hash = $null
+						$title = $null
+						$description = $null
+					}
+					$mode = 0
+				}
+
+				switch ($mode) {
+					0 { $date = $newDate; $mode++; break }
+					1 { $version = $(ParseTagRefs $currentLine); $mode++; break }
+					2 { $hash = $currentLine; $mode++; break }
+					3 { $title = $currentLine; $mode++; break }
+					4 {
+						if ($currentLine) {
+							$title += '|' + $currentLine
+						}
+						else {
+							$mode++
+						}
+						break
+					}
+					5 {
+						if ($description) {
+							$description += '|' + $currentLine
+						}
+						else {
+							$description = $currentLine
+						}
+					}
+					default { Write-Warning " *** Unexpected mode: $mode at line: $currentLine" }
+				}
+			}
+
+			($logEntries |
 				? { $_.title -inotmatch '^merge' -or $version } |
-				Group-Object -Property @{Expression = {$_.date.Date}}, version |
-				Sort-Object -Property @{Expression = {$_.Values[0]}; Descending = $true}, `
-										@{Expression = {$_.Values[1]}; Descending = $true} | % {
+				Group-Object -Property @{ Expression = { $_.date.Date } } |
+				Sort-Object -Property @{ Expression = { $_.Values[0] }; Descending = $true } |
+				% {
 					$group = $_
 					$dateStr = $group.Values[0].ToString('dd.MM.yyyy')
-					$verStr = $group.Values[1]
-					if ($verStr) {
-						if (! $lastVersion) {
-							$lastVersion = $verStr
-						}
-						$verStr = ' - ver. ' + $verStr
-					}
+					$verStr = ""
 					$group.Group | % {
-						$lines = "##### $dateStr$verStr`n"
-					}{
-						if (! $lastVersion) {
-							$lastVersion = 'test-' + $_.hash
+						$lines = ""
+					} {
+						# TODO: Support for untagged commit after a tag on the same date
+						if (!$verStr) {
+							$verStr = if ($_.version) { $_.version } else { "-" }
 						}
-						$lines+="###### $($_.title)`n$($_.description)`n"
-					}{
+						if (! $lastVersion) {
+							$lastVersion = if ($verStr -ne "-") { $verStr } else { 'test-' + $_.hash }
+						}
+						if (!$lines) {
+							$lines = if ($verStr -ne "-") { "##### $dateStr - ver. $verStr`n" } else { "##### $dateStr`n" }
+						}
+						$titles = ($_.title -split '\|' | % { '###### ' + $_ }) -join "`n"
+						$descriptions = $_.description -replace '\|', "`n"
+						$lines += "$titles`n$descriptions`n"
+					} {
 						-join $lines
 					}
-				} ) -join "-----`n"
+				}) -join "-----`n"
+
 				$lastVersion
 		}
 		else {
