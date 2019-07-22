@@ -101,15 +101,6 @@ function Send-AddonFile {
 
 	$InputFolder = $InputFolder.TrimEnd('\', '/')
 
-	$folderName = [System.IO.Path]::GetFileName($InputFolder)
-
-	if(! $ZipName) {
-		$ZipName = Join-Path $TempFolder ([System.IO.Path]::ChangeExtension($folderName, $zipFileExtension))
-	}
-	elseif([System.IO.Path]::GetExtension($ZipName) -ine $zipFileExtension) {
-		$ZipName = [System.IO.Path]::ChangeExtension($ZipName, $zipFileExtension)
-	}
-
 	try {
 		$cfg = Get-Content -Raw $Config | ConvertFrom-Json
 
@@ -128,6 +119,14 @@ function Send-AddonFile {
 		CopyLibs $cfg.libStore $(Join-Path $archFolder $libs) $cfg.libs
 
 		Set-Content -LiteralPath $(Join-Path $archFolder 'CHANGELOG.md') -Value $cfg.release.log -Force
+
+		if(! $ZipName) {
+			$folderName = [System.IO.Path]::GetFileName($InputFolder)
+			$ZipName = Join-Path $TempFolder "$folderName-$($cfg.release.version)$zipFileExtension"
+		}
+		elseif([System.IO.Path]::GetExtension($ZipName) -ine $zipFileExtension) {
+			$ZipName = [System.IO.Path]::ChangeExtension($ZipName, $zipFileExtension)
+		}
 
 		Compress-Archive $archFolder $ZipName -CompressionLevel Optimal
 
