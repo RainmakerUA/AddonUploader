@@ -1,5 +1,6 @@
 
 $configName = '.upload'
+$tokenFile = '.token'
 $zipFileExtension = '.zip'
 $tempFolderPrefix = '_upload_'
 $defaultExcludes = @('.*')
@@ -106,7 +107,7 @@ function Send-AddonFile {
 
 		$staticCfg = Get-Content $(Join-Path $PSScriptRoot 'AddonUploader.Config.psd1') -Raw |
 									Invoke-Expression
-		ApplyConfig $cfg
+		ApplyConfig $staticCfg
 
 		SetReleaseInfo $cfg.release
 
@@ -116,7 +117,7 @@ function Send-AddonFile {
 
 		# ReplaceContentBounds
 
-		CopyLibs $cfg.libStore $(Join-Path $archFolder $libs) $cfg.libs
+		CopyLibs $staticCfg.libStore $(Join-Path $archFolder $libs) $cfg.libs
 
 		Set-Content -LiteralPath $(Join-Path $archFolder 'CHANGELOG.md') -Value $cfg.release.log -Force
 
@@ -134,7 +135,7 @@ function Send-AddonFile {
 			Write-Host "File uploading skipped."
 		}
 		else {
-			$fileID = UploadArchive $InputFolder $ZipName $cfg.release
+			$fileID = UploadArchive $InputFolder $ZipName $cfg
 			Write-Host "File uploaded. ID = $fileID"
 		}
 	}
@@ -229,17 +230,33 @@ function MatchesWildcard($item, [string]$Wildcard) {
 	else { $false }
 }
 
+function GetToken([string] $tokenFile) {
+	if (! $tokenFile) {
+		$tokenFile = $script:tokenFile
+	}
+
+	if (! [IO.Path]::IsPathRooted($tokenFile)) {
+		$tokenFile = $(Join-Path $PSScriptRoot $tokenFile)
+	}
+
+	if (! (Test-Path -PathType Leaf -Path $tokenFile)) {
+		throw "Token file $tokenFile was not found!"
+	}
+
+	Deobfuscate $(Get-Content $tokenFile)
+}
+
 function ApplyConfig {
 	param (
 		[Parameter(Position = 0, Mandatory = $true)]
-		[PSCustomObject] $Config
+		[PSCustomObject] $StaticConfig
 	)
 
-	if ($Config.apiRoot) {
-		$script:apiRoot = $Config.apiRoot
+	if ($StaticConfig.ApiRoot) {
+		$script:apiRoot = $StaticConfig.ApiRoot
 	}
 
-	$script:apiHeaders['X-Api-Token'] = Deobfuscate $Config.token
+	$script:apiHeaders['X-Api-Token'] = GetToken $StaticConfig.TokenFile
 }
 
 function SetReleaseInfo {
@@ -494,16 +511,16 @@ function UploadArchive {
 		[Parameter(Position = 1, Mandatory = $true)]
 		[string] $ZipFile,
 		[Parameter(Position = 2, Mandatory = $true)]
-		[PSCustomObject] $Release
+		[PSCustomObject] $Cfg
 	)
 
-	$gameVersionIDs = GetGameVersionIDs $Release.gameVersions
+	$gameVersionIDs = GetGameVersionIDs $Cfg.release.gameVersions
 
 	$metadata = [PSCustomObject] @{
-		changelog = $Release.log;
+		changelog = $Cfg.release.log;
 		changelogType = 'markdown';
-		displayName = $Release.version;
-		releaseType = $Release.type;
+		displayName = $Cfg.release.version;
+		releaseType = $Cfg.release.type;
 		gameVersions = $gameVersionIDs;
 	}
 
@@ -512,7 +529,7 @@ function UploadArchive {
 		file = Get-Item -Path $ZipFile
 	}
 
-	$response = Invoke-RestMethod "${script:apiRoot}projects/$($Release.projectID)/upload-file" `
+	$response = Invoke-RestMethod "${script:apiRoot}projects/$($Cfg.projectID)/upload-file" `
 					-Method Post -Headers $script:apiHeaders -Form $form
 	$response.id
 }
