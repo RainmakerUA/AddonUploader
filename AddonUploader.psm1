@@ -447,7 +447,7 @@ function GetLog {
 			}
 
 			($logEntries |
-				? { $_.title -inotmatch '^merge' -or $version } |
+				? { $_.title -inotmatch '^merge' -or $_.version } |
 				Group-Object -Property @{ Expression = { $_.date.Date } } |
 				Sort-Object -Property @{ Expression = { $_.Values[0] }; Descending = $true } |
 				% {
