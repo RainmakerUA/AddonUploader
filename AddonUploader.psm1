@@ -3,7 +3,6 @@ $configName = '.upload'
 $tokenFile = '.token'
 $zipFileExtension = '.zip'
 $tempFolderPrefix = '_upload_'
-$defaultExcludes = @('.*')
 $libs = 'Libs'
 
 $apiRoot = 'https://wow.curseforge.com/api/'
@@ -111,7 +110,14 @@ function Send-AddonFile {
 
 		SetReleaseInfo $cfg.release
 
-		$archFolder = CopySource $InputFolder $TempFolder $($defaultExcludes + $cfg.exclude)
+		$whatsnewPath = Join-Path $InputFolder 'WhatsNew.md'
+
+		if (Test-Path -LiteralPath $whatsnewPath) {
+			$whatsnew = Get-Content $whatsnewPath -Raw
+			$cfg.release.log = $whatsnew + "`n" + $cfg.release.log
+		}
+
+		$archFolder = CopySource $InputFolder $TempFolder $($staticCfg.Excludes + $cfg.exclude)
 
 		ReplaceContentPlaceholders $archFolder $staticCfg.ReplaceMask $cfg
 
@@ -140,7 +146,7 @@ function Send-AddonFile {
 		}
 	}
 	finally {
-		if (Test-Path -LiteralPath $TempFolder -PathType Container ) {
+		if (Test-Path -LiteralPath $TempFolder -PathType Container) {
 			if ($NoCleanup) {
 				Write-Host -NoNewline -ForegroundColor DarkYellow "Temp folder left: "
 				Write-Host -ForegroundColor Yellow $TempFolder
