@@ -1,4 +1,11 @@
 
+$localeDirName = "Locales"
+$localeFormat = 'locale-{0}.lua'
+$trueParam = ', true'
+$loc_re = '(?<=L\[")([^"]+?)(?="\])'
+$ext_re = '^[A-Z0-9._]+$'
+$old_re = '(?m)^L\["([^"]+?)"\]\s*=\s*"([^"]+?)"'
+
 $configName = '.upload'
 $tokenFile = '.token'
 $zipFileExtension = '.zip'
@@ -9,6 +16,77 @@ $apiRoot = 'https://wow.curseforge.com/api/'
 $apiHeaders = @{
 	"User-Agent" = "RM.AddonUploader-1.0.0";
 	"X-Api-Token" = $nil
+}
+
+function Update-Localization {
+	[CmdletBinding()]
+	param (
+		[Parameter(Position = 0, Mandatory = $false)]
+		[string] $InputFolder,
+		[Parameter(Position = 1, Mandatory = $false)]
+		[string] $SourceMask,
+		[Parameter(Position = 2, Mandatory = $false)]
+		[string[]] $Locales,
+		[Parameter(Position = 3, Mandatory = $false)]
+		[string] $BaseLocale
+	)
+
+	if (! $InputFolder) {
+		$InputFolder = $(Get-Item '.\').FullName
+	}
+	else {
+		$InputFolder = Resolve-Path $InputFolder
+	}
+
+	$projName = Split-Path $InputFolder -Leaf
+	$localeDir = Join-Path $InputFolder $script:localeDirName
+
+	if (! $SourceMask) {
+		$SourceMask = "$projName*.lua"
+	}
+
+	if (! $Locales) {
+		$localePattern = '^' + $($script:localeFormat -f '([a-zA-Z]{4})\') + '$'
+		$Locales = Get-ChildItem $(Join-Path $localeDir $($script:localeFormat -f '*')) | %{ $_.Name } `
+					| Select-String -Pattern $localePattern `
+					| %{ $_.Matches.Groups[1].Value }
+	}
+
+	if (! $Locales) {
+		$Locales = @('enUS', 'ruRU')
+	}
+
+	if (! $BaseLocale -or ! $Locales.Contains($BaseLocale)) {
+		$BaseLocale = $Locales[0]
+	}
+
+	$localeHeaderFmt = "-- This file is generated with $($MyInvocation.MyCommand.ModuleName)::$($MyInvocation.MyCommand.Name)
+local L = LibStub(`"AceLocale-3.0`"):NewLocale(`"$projName`", `"{0}`"{1})
+if not L then return end
+---------- Total: {2} ----------"
+
+	$localeSources = Get-ChildItem $(Join-Path $InputFolder $SourceMask) -Recurse
+	$locStrings = $localeSources | %{ $strings = @() } { $strings += (Get-Content $_ -Raw | Select-String $script:loc_re -AllMatches | %{ $_.matches.Value }) } { $strings } | Select-Object -Unique
+
+	$total = $locStrings.Length
+	$ext_strings = $locStrings | ?{ $_ -cmatch $script:ext_re }
+	$strings = $locStrings | ?{ $_ -cnotmatch $script:ext_re }
+
+	$Locales | %{
+		$locale = $_
+		$oldFile = Join-Path $localeDir "locale-$locale.lua"
+		$file = "$oldFile.new"
+
+		Select-String -Path $oldFile -Encoding utf8 -Pattern $script:old_re `
+				| %{$oldStrings = [hashtable]::new()} { $_.Matches | %{ $oldStrings[$_.Groups[1].Value] = $_.Groups[2].Value } } {$oldStrings} `
+				| Out-Null
+
+		Set-Content $file ([string]::Format($localeHeaderFmt, $locale, $(if($locale -eq $BaseLocale){ $script:trueParam } else { "" }), $total))
+
+		@($strings, $ext_strings) | %{
+			Add-Content $file ($_ | %{ if($locale -eq $BaseLocale -and !$oldStrings[$_]){ "L[`"$_`"] = true" } else { "L[`"{0}`"] = `"{1}`"" -f $_, $(if($oldStrings[$_]) { $oldStrings[$_] } else { $_ }) } })
+		}
+	}
 }
 
 function Get-ObfuscatedString {
@@ -22,10 +100,10 @@ function Get-ObfuscatedString {
 		[switch] $NoKeyOutput
 	)
 
-	$ints = $Source -split '' | ?{ $_ } | %{ [int][char]$_ }
+	$measures = $Source -split '' | ?{ $_ } | %{ [int][char]$_ } | measure -Minimum -Maximum
 
-	$max = ($ints | measure -Minimum).Minimum
-	$min = ($ints | measure -Maximum).Maximum - 99
+	$max = $measures.Minimum
+	$min = $measures.Maximum - 99
 
 	if($min -gt $max) {
 		throw "The string provided cannot be obfuscated!"
