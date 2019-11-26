@@ -137,7 +137,7 @@ function Get-ObfuscatedString {
 	if($NoKeyOutput) { $obf } else { "${strKey}:" + $obf }
 }
 
-function Send-AddonFile {
+function Publish-AddonFile {
 	[CmdletBinding()]
 	param(
 		[Parameter(Position = 0, Mandatory = $false)]
