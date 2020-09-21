@@ -600,6 +600,10 @@ function UploadArchive {
 
 	$gameVersionIDs = GetGameVersionIDs $Cfg.release.gameVersions
 
+	if ($gameVersionIDs.Count -eq 1) {
+		$gameVersionIDs = @($gameVersionIDs)
+	}
+
 	$metadata = [PSCustomObject] @{
 		changelog = $Cfg.release.log;
 		changelogType = 'markdown';
