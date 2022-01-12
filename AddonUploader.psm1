@@ -2,7 +2,7 @@
 $localeDirName = "Locales"
 $localeFormat = 'locale-{0}.lua'
 $trueParam = ', true'
-$loc_re = '(?<=L\[")([^"]+?)(?="\])'
+$loc_re = '(?:(?<=[\s\(\[])L(?<br>\[)?\"(?<str>(?:\\.|[^"])*)\"(?(br)\]|))'
 $ext_re = '^[A-Z0-9._]+$'
 $old_re = '(?m)^L\["([^"]+?)"\]\s*=\s*"([^"]+?)"'
 
@@ -64,9 +64,10 @@ function Update-Localization {
 local L = LibStub(`"AceLocale-3.0`"):NewLocale(`"$projName`", `"{0}`"{1})
 if not L then return end
 ---------- Total: {2} ----------"
-
 	$localeSources = Get-ChildItem $(Join-Path $InputFolder $SourceMask) -Recurse
-	$locStrings = $localeSources | %{ $strings = @() } { $strings += (Get-Content $_ -Raw | Select-String $script:loc_re -AllMatches | %{ $_.matches.Value }) } { $strings } | Select-Object -Unique
+	$locStrings = $localeSources | %{ $strings = @() } `
+									{ $strings += ((Select-String -Path $_ -Encoding utf8 -Pattern $script:loc_re -CaseSensitive -AllMatches).Matches | ?{ $_ } | %{ $_.Groups['str'].Value } ) } `
+									{ $strings } | Select-Object -Unique
 
 	$total = $locStrings.Length
 	$ext_strings = $locStrings | ?{ $_ -cmatch $script:ext_re }
@@ -76,10 +77,13 @@ if not L then return end
 		$locale = $_
 		$oldFile = Join-Path $localeDir "locale-$locale.lua"
 		$file = "$oldFile.new"
-
-		Select-String -Path $oldFile -Encoding utf8 -Pattern $script:old_re `
-				| %{$oldStrings = [hashtable]::new()} { $_.Matches | %{ $oldStrings[$_.Groups[1].Value] = $_.Groups[2].Value } } {$oldStrings} `
-				| Out-Null
+		$oldStrings = @{ }
+  
+		if (Test-Path -LiteralPath $oldFile -PathType Leaf) {
+			Select-String -Path $oldFile -Encoding utf8 -Pattern $script:old_re `
+					| %{ } { $_.Matches | %{ $oldStrings[$_.Groups[1].Value] = $_.Groups[2].Value } } {$oldStrings} `
+					| Out-Null
+		}
 
 		Set-Content $file ([string]::Format($localeHeaderFmt, $locale, $(if($locale -eq $BaseLocale){ $script:trueParam } else { "" }), $total))
 
