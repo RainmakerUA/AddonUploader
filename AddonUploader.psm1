@@ -38,11 +38,10 @@ function Update-Localization {
 		$InputFolder = Resolve-Path $InputFolder
 	}
 
-	$projName = Split-Path $InputFolder -Leaf
 	$localeDir = Join-Path $InputFolder $script:localeDirName
 
 	if (! $SourceMask) {
-		$SourceMask = "$projName*.lua"
+		$SourceMask = "*.lua"
 	}
 
 	if (! $Locales) {
@@ -61,7 +60,8 @@ function Update-Localization {
 	}
 
 	$localeHeaderFmt = "-- This file is generated with $($MyInvocation.MyCommand.ModuleName)::$($MyInvocation.MyCommand.Name)
-local L = LibStub(`"AceLocale-3.0`"):NewLocale(`"$projName`", `"{0}`"{1})
+local addonName = ...
+local L = LibStub(`"AceLocale-3.0`"):NewLocale(addonName, `"{0}`"{1})
 if not L then return end
 ---------- Total: {2} ----------"
 	$localeSources = Get-ChildItem $(Join-Path $InputFolder $SourceMask) -Recurse
