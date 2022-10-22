@@ -88,7 +88,7 @@ if not L then return end
 		Set-Content $file ([string]::Format($localeHeaderFmt, $locale, $(if($locale -eq $BaseLocale){ $script:trueParam } else { "" }), $total))
 
 		@($strings, $ext_strings) | %{
-			Add-Content $file ($_ | %{ if($locale -eq $BaseLocale -and !$oldStrings[$_]){ "L[`"$_`"] = true" } else { "L[`"{0}`"] = `"{1}`"" -f $_, $(if($oldStrings[$_]) { $oldStrings[$_] } else { $_ }) } })
+			Add-Content $file ($_ | %{ if($locale -eq $BaseLocale -and ! $oldStrings[$_]){ "L[`"$_`"] = true" } else { "L[`"{0}`"] = `"{1}`"" -f $_, $(if($oldStrings[$_]) { $oldStrings[$_] } else { $_ }) } })
 		}
 	}
 }
@@ -177,17 +177,15 @@ function Publish-AddonFile {
 	}
 
 	if(! $TempFolder) {
-		$TempFolder = Join-Path ([System.IO.Path]::GetTempPath()) `
-								$($tempFolderPrefix + [System.IO.Path]::GetRandomFileName())
+		$TempFolder = Join-Path ([System.IO.Path]::GetTempPath()) $($tempFolderPrefix + [System.IO.Path]::GetRandomFileName())
 	}
 
 	$InputFolder = $InputFolder.TrimEnd('\', '/')
 
 	try {
 		$cfg = Get-Content -Raw $Config | ConvertFrom-Json
+		$staticCfg = Get-Content $(Join-Path $PSScriptRoot 'AddonUploader.Config.psd1') -Raw | Invoke-Expression
 
-		$staticCfg = Get-Content $(Join-Path $PSScriptRoot 'AddonUploader.Config.psd1') -Raw |
-									Invoke-Expression
 		ApplyConfig $staticCfg
 
 		SetReleaseInfo $cfg.release
@@ -203,7 +201,7 @@ function Publish-AddonFile {
 
 		ReplaceContentPlaceholders $archFolder $staticCfg.ReplaceMask $cfg
 
-		# ReplaceContentBounds
+		ReplaceContentBounds $archFolder $staticCfg $cfg.release.type
 
 		CopyLibs $staticCfg.libStore $(Join-Path $archFolder $libs) $cfg.libs
 
@@ -459,13 +457,65 @@ function ReplaceContentPlaceholders {
 	}
 }
 
+function ReplaceContentBounds([string] $folder, [hashtable] $cfg, [string] $releaseType) {
+	ListItems $folder $cfg.ReplaceMask | % {
+		$file = $_
+		$extension = $(Split-Path $file -Extension)
+		$replaces = $cfg.Replace.$extension
+
+		if ($replaces) {
+			$replaces | ? { ! $_.Types -or $_.Types -contains $releaseType } | % { ApplyReplacement $file.FullName $_ }
+		}
+	}
+}
+
+function ApplyReplacement([string] $filename, [hashtable] $replacement) {
+    Write-Debug "Replacing bounds in '$filename'"
+	$startFrom = $replacement.Start[0]
+	$startTo = $replacement.Start[1]
+	$endFrom = $replacement.End[0]
+	$endTo = $replacement.End[1]
+	$remove = $replacement.RemoveBetween
+	$prefix = $replacement.PrefixBetween
+
+	$lines = Get-Content -LiteralPath $filename
+	$replaced = @()
+	$inside = $false
+
+	foreach ($line in $lines) {
+		if ($line.Contains($startFrom)) {
+			if ($startTo) {
+                Write-Debug "Replacing '$startFrom' -> '$startTo'"
+				$replaced += $($line -replace $startFrom,$startTo)
+			}
+			$inside = $true
+		} elseif ($line.Contains($endFrom)) {
+			if ($endTo) {
+                Write-Debug "Replacing '$endFrom' -> '$endTo'"
+				$replaced += $($line -replace $endFrom, $endTo)
+			}
+			$inside = $false
+		} elseif ($inside -and $prefix) {
+            Write-Debug "Prefixing with '$prefix'"
+			$replaced += ($prefix + $line)
+		} elseif (! $inside -or ! $remove) {
+            Write-Verbose "Copy line to resulting file"
+			$replaced += $line
+		} else {
+            Write-Debug "Skip line"
+        }
+	}
+
+	Set-Content -LiteralPath $filename -Value $replaced -Force
+}
+
 function ParseTagRefs([string] $refs) {
-	[string]($refs | Select-String 'tag:\s*([\w-.]+)' -AllMatches | %{$_.matches} | %{ $_.Groups[1].Value} | sort | select -Last 1)
+	[string]($refs | Select-String 'tag:\s*([\w-.]+)' -AllMatches | % { $_.matches } | % { $_.Groups[1].Value } | sort | select -Last 1)
 }
 
 <################################################
 # GetLog: function gets git log (change log)
-# and last ersion from tag or commit hash
+# and last version from tag or commit hash
 # from the git repo in the folder as markdown
 ################################################>
 function GetLog {
@@ -546,13 +596,13 @@ function GetLog {
 						$lines = ""
 					} {
 						# TODO: Support for untagged commit after a tag on the same date
-						if (!$verStr) {
+						if (! $verStr) {
 							$verStr = if ($_.version) { $_.version } else { "-" }
 						}
 						if (! $lastVersion) {
 							$lastVersion = if ($verStr -ne "-") { $verStr } else { 'test-' + $_.hash }
 						}
-						if (!$lines) {
+						if (! $lines) {
 							$lines = if ($verStr -ne "-") { "##### $dateStr - ver. $verStr`n" } else { "##### $dateStr`n" }
 						}
 						$titles = ($_.title -split '\|' | % { '###### ' + $_ }) -join "`n"
@@ -581,8 +631,7 @@ function GetGameVersionIDs {
 		[string[]] $Versions
 	)
 
-	$resp = Invoke-RestMethod "${script:apiRoot}game/versions" -Method Get `
-				-Headers $script:apiHeaders
+	$resp = Invoke-RestMethod "${script:apiRoot}game/versions" -Method Get -Headers $script:apiHeaders
 
 	if ($Versions) {
 		$resp | ?{ $Versions.Contains($_.name) } | %{ $_.id }
